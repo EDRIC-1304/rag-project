@@ -1,0 +1,2 @@
+RAG stands for Retrieval Augmented Generation.
+It combines search with large language models.
