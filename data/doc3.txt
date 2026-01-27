@@ -1,1 +1,0 @@
-Edric is building this project to understand how RAG systems work.

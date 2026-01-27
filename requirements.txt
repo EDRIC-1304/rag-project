@@ -5,3 +5,6 @@ sentence-transformers
 faiss-cpu
 langchain-huggingface
 langchain-ollama
+fastapi
+uvicorn
+python-multipart

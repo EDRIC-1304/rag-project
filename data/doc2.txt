@@ -1,2 +1,0 @@
-This project loads documents, converts them to embeddings,
-and answers questions using context.
