@@ -2,9 +2,9 @@ import os
 from pathlib import Path
 from typing import List
 
+from langchain_core.documents import Document
 from pypdf import PdfReader
 from docx import Document as DocxDocument
-from langchain_core.documents import Document
 
 
 class DocumentLoader:
@@ -21,8 +21,10 @@ class DocumentLoader:
     def load_pdf(self, path: str) -> str:
         reader = PdfReader(path)
         text = ""
+
         for page in reader.pages:
             text += page.extract_text() or ""
+
         return text
 
 
@@ -31,25 +33,39 @@ class DocumentLoader:
         return "\n".join([p.text for p in doc.paragraphs])
 
 
+    # ✅ NEW: attach metadata
     def load(self) -> List[Document]:
+
         documents = []
 
         for file in os.listdir(self.folder_path):
+
             path = os.path.join(self.folder_path, file)
             suffix = Path(file).suffix.lower()
 
-            if suffix == ".txt":
-                text = self.load_txt(path)
+            text = ""
 
-            elif suffix == ".pdf":
-                text = self.load_pdf(path)
+            try:
+                if suffix == ".txt":
+                    text = self.load_txt(path)
 
-            elif suffix == ".docx":
-                text = self.load_docx(path)
+                elif suffix == ".pdf":
+                    text = self.load_pdf(path)
 
-            else:
-                continue
+                elif suffix == ".docx":
+                    text = self.load_docx(path)
 
-            documents.append(Document(page_content=text, metadata={"source": file}))
+                else:
+                    continue
+
+                documents.append(
+                    Document(
+                        page_content=text,
+                        metadata={"source": file}   # ⭐ CRITICAL
+                    )
+                )
+
+            except Exception as e:
+                print(f"Failed loading {file}: {e}")
 
         return documents

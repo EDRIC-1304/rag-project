@@ -1,16 +1,30 @@
+import os
 from langchain_community.vectorstores import FAISS
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.embeddings import OllamaEmbeddings
+
+INDEX_PATH = "faiss_index"
+
+embeddings = OllamaEmbeddings(model="mistral")
 
 
+# -------------------------
+# CREATE + SAVE
+# -------------------------
 def create_vector_store(chunks):
-    # embedding model (free + local)
-    embeddings = HuggingFaceEmbeddings(
-        model_name="all-MiniLM-L6-v2"
-    )
 
-    vector_store = FAISS.from_documents(
-        chunks,
-        embeddings
-    )
+    db = FAISS.from_documents(chunks, embeddings)
 
-    return vector_store
+    db.save_local(INDEX_PATH)   #  SAVE TO DISK
+
+    return db
+
+
+# -------------------------
+# LOAD EXISTING
+# -------------------------
+def load_vector_store():
+
+    if os.path.exists(INDEX_PATH):
+        return FAISS.load_local(INDEX_PATH, embeddings, allow_dangerous_deserialization=True)
+
+    return None
