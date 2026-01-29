@@ -8,6 +8,9 @@ from backend.rag.chunker import chunk_documents
 from backend.rag.vector_store import create_vector_store
 
 from langchain_ollama import OllamaLLM
+from backend.rag.hybrid_retriever import HybridRetriever
+import json
+from fastapi.responses import StreamingResponse
 
 
 # ==============================
@@ -34,6 +37,7 @@ UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 vector_store = None
+retriever = None
 
 
 # =========================================================
@@ -56,44 +60,39 @@ async def upload_file(file: UploadFile = File(...)):
 
     chunks = chunk_documents(docs)
 
-    global vector_store
+    global vector_store, retriever
+
     vector_store = create_vector_store(chunks)
 
-    return {"message": "File uploaded and indexed"}
+    retriever = HybridRetriever(vector_store, chunks)
 
+    return {"message": "File uploaded and indexed"}
 
 # =========================================================
 # SEARCH
 # =========================================================
-def search_chunks(vector_store, query, k=6, score_threshold=1.55):
-
-    results = vector_store.similarity_search_with_score(query, k=k)
-
-    filtered_docs = []
+def search_chunks(retriever, query, k=6):
+    """
+    Uses HybridRetriever (FAISS + BM25)
+    Returns list of Document objects
+    """
 
     print("\n======================")
     print("QUERY:", query)
     print("======================")
 
-    for i, (doc, score) in enumerate(results):
+    docs = retriever.search(query, k=k)
 
-        print(f"Chunk {i+1} | score={score:.4f}")
+    for i, doc in enumerate(docs):
+        print(f"Chunk {i+1}")
+        print(doc.page_content[:300])
 
-        # ✅ keep only strong matches
-        if score <= score_threshold:
-            filtered_docs.append(doc)
-
-    # fallback (avoid empty context crash)
-    if not filtered_docs:
-        filtered_docs = [results[0][0]]
-
-    return filtered_docs
+    return docs
 
 # =========================================================
 # GENERATE
 # =========================================================
-def generate_answer(query, docs):
-
+def stream_answer(query, docs):
     context = "\n\n".join([d.page_content for d in docs])
 
     prompt = f"""
@@ -107,26 +106,11 @@ Question:
 {query}
 """
 
-    response = llm.invoke(prompt)
+    # ---- stream tokens ----
+    for chunk in llm.stream(prompt):
+        yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
 
-    return response
-
-
-# =========================================================
-# ASK  (PART 12 — citations)
-# =========================================================
-@app.post("/ask")
-async def ask_question(query: str):
-
-    global vector_store
-
-    if vector_store is None:
-        return {"answer": "Upload documents first"}
-
-    docs = search_chunks(vector_store, query)
-
-    answer = generate_answer(query, docs)
-
+    # ---- send sources at end ----
     sources = []
     seen = set()
 
@@ -143,11 +127,28 @@ async def ask_question(query: str):
                 "preview": d.page_content[:120]
             })
 
-    return {
-        "answer": answer,
-        "sources": sources
-    }
+    yield f"data: {json.dumps({'type': 'sources', 'data': sources})}\n\n"
 
+    # ---- done signal ----
+    yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+# =========================================================
+# ASK  (PART 12 — citations)
+# =========================================================
+@app.post("/ask")
+async def ask_question(query: str):
+
+    global vector_store
+
+    if vector_store is None:
+        return {"answer": "Upload documents first"}
+
+    docs = search_chunks(vector_store, query)
+
+    return StreamingResponse(
+        stream_answer(query, docs),
+        media_type="text/event-stream"   # 🔥 IMPORTANT
+    )
 
 # =========================================================
 # ROOT
